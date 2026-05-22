@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UWB vs 협대역(Narrowband) 대역폭 시뮬레이션</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f0f2f5;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+        }
+        .container {
+            background-color: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            max-width: 800px;
+            width: 100%;
+        }
+        h2 {
+            text-align: center;
+            color: #333;
+            margin-top: 0;
+        }
+        .controls {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        .control-group {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        label {
+            flex: 1;
+            font-weight: bold;
+            color: #555;
+        }
+        input[type="range"] {
+            flex: 2;
+            margin: 0 15px;
+        }
+        .value-display {
+            flex: 0.5;
+            text-align: right;
+            font-family: monospace;
+            font-size: 1.2em;
+            font-weight: bold;
+            color: #d9534f; /* Default Narrowband Color */
+        }
+        .uwb-active .value-display {
+            color: #0275d8; /* UWB Color */
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-weight: bold;
+            color: white;
+            background-color: #d9534f;
+            text-align: center;
+            margin-bottom: 15px;
+            width: 100%;
+            box-sizing: border-box;
+            font-size: 1.1em;
+            transition: background-color 0.3s;
+        }
+        .uwb-active .status-badge {
+            background-color: #0275d8;
+        }
+        .info-panel {
+            background: #eef2f7;
+            border-left: 4px solid #d9534f;
+            padding: 15px;
+            margin-bottom: 20px;
+            font-size: 0.95em;
+            line-height: 1.6;
+            transition: border-color 0.3s;
+        }
+        .uwb-active .info-panel {
+            border-left-color: #0275d8;
+        }
+        .canvas-container {
+            position: relative;
+            margin-bottom: 20px;
+        }
+        .canvas-title {
+            position: absolute;
+            top: 10px;
+            left: 15px;
+            font-weight: bold;
+            color: #333;
+            background: rgba(255,255,255,0.8);
+            padding: 2px 8px;
+            border-radius: 4px;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background: #fafafa;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container" id="mainContainer">
+    <h2>📡 대역폭(Bandwidth) 펄스 및 간섭 시뮬레이터</h2>
+    
+    <div id="statusBadge" class="status-badge">협대역 (Narrowband) 통신 상태</div>
+
+    <div class="controls">
+        <div class="control-group">
+            <label for="bandwidth">주파수 대역폭 (Bandwidth)</label>
+            <input type="range" id="bandwidth" min="20" max="1000" value="20" step="10">
+            <div class="value-display" id="bwVal">20 MHz</div>
+        </div>
+    </div>
+
+    <div class="info-panel" id="infoPanel">
+        <strong>시간 영역(Time Domain):</strong> 대역폭이 좁아 펄스가 매우 넓게 퍼져 있습니다. 다중 경로 환경에서 반사파와 쉽게 겹쳐 간섭이 발생합니다.<br>
+        <strong>주파수 영역(Freq Domain):</strong> 에너지가 좁은 대역에 집중되어 신호 세기가 강합니다. 다른 통신 기기에 간섭을 줄 수 있습니다.
+    </div>
+
+    <div class="canvas-container">
+        <div class="canvas-title">시간 영역 (Time Domain) - 펄스 폭</div>
+        <canvas id="timeCanvas" width="740" height="200"></canvas>
+    </div>
+    
+    <div class="canvas-container">
+        <div class="canvas-title">주파수 영역 (Frequency Domain) - 전력 스펙트럼 밀도</div>
+        <canvas id="freqCanvas" width="740" height="200"></canvas>
+    </div>
+</div>
+
+<script>
+    // 상태 변수
+    let bandwidth = 20; // 초기 대역폭 (MHz)
+    const UWB_THRESHOLD = 500; // UWB 기준 대역폭
+
+    // DOM 요소
+    const bwSlider = document.getElementById('bandwidth');
+    const bwVal = document.getElementById('bwVal');
+    const mainContainer = document.getElementById('mainContainer');
+    const statusBadge = document.getElementById('statusBadge');
+    const infoPanel = document.getElementById('infoPanel');
+    
+    const timeCanvas = document.getElementById('timeCanvas');
+    const timeCtx = timeCanvas.getContext('2d');
+    const freqCanvas = document.getElementById('freqCanvas');
+    const freqCtx = freqCanvas.getContext('2d');
+
+    // 이벤트 리스너
+    bwSlider.addEventListener('input', (e) => {
+        bandwidth = parseInt(e.target.value);
+        bwVal.textContent = bandwidth + ' MHz';
+        updateUI();
+        draw();
+    });
+
+    // UI 텍스트 및 스타일 업데이트
+    function updateUI() {
+        if (bandwidth >= UWB_THRESHOLD) {
+            mainContainer.classList.add('uwb-active');
+            statusBadge.textContent = "UWB (초광대역) 통신 활성화됨";
+            infoPanel.innerHTML = `
+                <strong>시간 영역(Time Domain):</strong> 펄스가 나노초(ns) 단위의 바늘처럼 매우 뾰족해졌습니다! 반사파와 섞이지 않아 정밀한 거리 측정이 가능합니다.<br>
+                <strong>주파수 영역(Freq Domain):</strong> 에너지가 광활한 대역으로 넓게 분산되어 점선으로 표시된 <strong>노이즈 바닥(Noise Floor) 아래로 숨었습니다.</strong> 다른 기기에 간섭을 주지 않습니다. (언더레이 통신)
+            `;
+        } else {
+            mainContainer.classList.remove('uwb-active');
+            statusBadge.textContent = "협대역 (Narrowband) 통신 상태";
+            infoPanel.innerHTML = `
+                <strong>시간 영역(Time Domain):</strong> 대역폭이 좁아 펄스가 시간축에서 넓게 퍼져 있습니다. 다중 경로 환경에서 반사파와 겹쳐 위치 오차가 발생합니다.<br>
+                <strong>주파수 영역(Freq Domain):</strong> 에너지가 좁은 대역에 집중되어 피크가 높습니다. 노이즈 바닥보다 훨씬 위에 있어 다른 통신 기기에 간섭을 줄 수 있습니다.
+            `;
+        }
+    }
+
+    // 렌더링 함수
+    function draw() {
+        drawTimeDomain();
+        drawFreqDomain();
+    }
+
+    // 1. 시간 영역 (Time Domain) 렌더링
+    function drawTimeDomain() {
+        timeCtx.clearRect(0, 0, timeCanvas.width, timeCanvas.height);
+        
+        const cx = timeCanvas.width / 2;
+        const cy = timeCanvas.height / 2 + 50; // X축 위치
+        
+        // 축 그리기
+        drawAxes(timeCtx, "시간 (Time, ns)", "진폭 (Amplitude)");
+
+        // 펄스폭 계산 (대역폭에 반비례)
+        // bw가 20이면 넓게, 1000이면 매우 좁게
+        const timeWidth = 3000 / bandwidth; 
+        const maxAmp = 120; // 진폭은 시간축에서 일정하게 보이도록 고정
+        const color = bandwidth >= UWB_THRESHOLD ? '#0275d8' : '#d9534f';
+
+        timeCtx.beginPath();
+        timeCtx.strokeStyle = color;
+        timeCtx.lineWidth = 3;
+        
+        for (let x = 0; x < timeCanvas.width; x++) {
+            // 가우시안 펄스 공식: e^(-(x-cx)^2 / w^2)
+            const y = cy - maxAmp * Math.exp(-Math.pow((x - cx) / timeWidth, 2));
+            if (x === 0) timeCtx.moveTo(x, y);
+            else timeCtx.lineTo(x, y);
+        }
+        timeCtx.stroke();
+        
+        // 펄스 폭 표시 (화살표)
+        const halfMaxY = cy - maxAmp / 2;
+        const widthAtHalf = timeWidth * Math.sqrt(Math.log(2));
+        
+        timeCtx.beginPath();
+        timeCtx.strokeStyle = '#555';
+        timeCtx.lineWidth = 1;
+        timeCtx.moveTo(cx - widthAtHalf, halfMaxY);
+        timeCtx.lineTo(cx + widthAtHalf, halfMaxY);
+        timeCtx.stroke();
+        
+        // 화살표 끝부분 (간단히 수직선으로)
+        timeCtx.beginPath();
+        timeCtx.moveTo(cx - widthAtHalf, halfMaxY - 5); timeCtx.lineTo(cx - widthAtHalf, halfMaxY + 5);
+        timeCtx.moveTo(cx + widthAtHalf, halfMaxY - 5); timeCtx.lineTo(cx + widthAtHalf, halfMaxY + 5);
+        timeCtx.stroke();
+        
+        timeCtx.fillStyle = '#555';
+        timeCtx.font = "12px sans-serif";
+        timeCtx.fillText("Δt (펄스 폭)", cx + widthAtHalf + 10, halfMaxY + 4);
+    }
+
+    // 2. 주파수 영역 (Frequency Domain) 렌더링
+    function drawFreqDomain() {
+        freqCtx.clearRect(0, 0, freqCanvas.width, freqCanvas.height);
+        
+        const cx = timeCanvas.width / 2;
+        const cy = freqCanvas.height - 30; // X축 위치
+        const noiseFloorY = cy - 40; // 노이즈 바닥의 Y 좌표 (캔버스 상에서 아래쪽)
+        
+        // 축 그리기
+        drawAxes(freqCtx, "주파수 (Frequency, MHz)", "전력 (Power Spectral Density)");
+
+        // 노이즈 바닥 (Noise Floor) 점선 그리기
+        freqCtx.beginPath();
+        freqCtx.strokeStyle = '#888';
+        freqCtx.lineWidth = 2;
+        freqCtx.setLineDash([5, 5]);
+        freqCtx.moveTo(50, noiseFloorY);
+        freqCtx.lineTo(freqCanvas.width - 20, noiseFloorY);
+        freqCtx.stroke();
+        freqCtx.setLineDash([]);
+        
+        freqCtx.fillStyle = '#888';
+        freqCtx.font = "12px sans-serif";
+        freqCtx.fillText("Noise Floor (배경 노이즈 바닥)", freqCanvas.width - 180, noiseFloorY - 10);
+
+        // PSD 계산
+        // 대역폭이 넓어질수록, 폭은 넓어지고 높이는 낮아짐 (총 에너지 보존)
+        const freqWidth = bandwidth / 3; 
+        
+        // 높이는 대역폭에 반비례. 
+        // 500MHz 일 때 높이가 노이즈 플로어(40) 아래로 내려가도록 식 설정
+        // 15000 / 500 = 30 (노이즈 플로어 40보다 낮음 -> Underlay 구현)
+        let psdAmp = 15000 / bandwidth; 
+        if(psdAmp > 150) psdAmp = 150; // UI상 그래프가 천장을 뚫지 않게 제한
+
+        const color = bandwidth >= UWB_THRESHOLD ? 'rgba(2, 117, 216, 0.5)' : 'rgba(217, 83, 79, 0.5)';
+        const strokeColor = bandwidth >= UWB_THRESHOLD ? '#0275d8' : '#d9534f';
+
+        freqCtx.beginPath();
+        freqCtx.fillStyle = color;
+        freqCtx.strokeStyle = strokeColor;
+        freqCtx.lineWidth = 2;
+        
+        freqCtx.moveTo(0, cy);
+        for (let x = 0; x < freqCanvas.width; x++) {
+            // 가우시안 커브
+            const y = cy - psdAmp * Math.exp(-Math.pow((x - cx) / freqWidth, 2));
+            freqCtx.lineTo(x, y);
+        }
+        freqCtx.lineTo(freqCanvas.width, cy);
+        freqCtx.fill();
+        freqCtx.stroke();
+        
+        // 대역폭 폭 표시
+        const halfPsdAmpY = cy - psdAmp / 2;
+        const freqWidthAtHalf = freqWidth * Math.sqrt(Math.log(2));
+        
+        freqCtx.beginPath();
+        freqCtx.strokeStyle = strokeColor;
+        freqCtx.lineWidth = 1;
+        freqCtx.moveTo(cx - freqWidthAtHalf, halfPsdAmpY);
+        freqCtx.lineTo(cx + freqWidthAtHalf, halfPsdAmpY);
+        freqCtx.stroke();
+        
+        freqCtx.fillStyle = strokeColor;
+        freqCtx.font = "bold 12px sans-serif";
+        freqCtx.fillText("대역폭 " + bandwidth + " MHz", cx - 40, halfPsdAmpY - 10);
+    }
+
+    // 공통 축 그리기 함수
+    function drawAxes(ctx, xLabel, yLabel) {
+        const paddingLeft = 40;
+        const paddingBottom = 30;
+        const width = ctx.canvas.width;
+        const height = ctx.canvas.height;
+        
+        ctx.beginPath();
+        ctx.strokeStyle = '#aaa';
+        ctx.lineWidth = 2;
+        
+        // Y축
+        ctx.moveTo(paddingLeft, 10);
+        ctx.lineTo(paddingLeft, height - paddingBottom);
+        // X축
+        ctx.lineTo(width - 10, height - paddingBottom);
+        ctx.stroke();
+        
+        // 화살표
+        ctx.beginPath();
+        ctx.moveTo(paddingLeft - 4, 15); ctx.lineTo(paddingLeft, 5); ctx.lineTo(paddingLeft + 4, 15);
+        ctx.moveTo(width - 15, height - paddingBottom - 4); ctx.lineTo(width - 5, height - paddingBottom); ctx.lineTo(width - 15, height - paddingBottom + 4);
+        ctx.fillStyle = '#aaa';
+        ctx.fill();
+
+        // 라벨
+        ctx.fillStyle = '#666';
+        ctx.font = "12px sans-serif";
+        ctx.fillText(xLabel, width - 150, height - 10);
+        
+        ctx.save();
+        ctx.translate(15, 120);
+        ctx.rotate(-Math.PI / 2);
+        ctx.fillText(yLabel, 0, 0);
+        ctx.restore();
+    }
+
+    // 초기 화면 렌더링
+    updateUI();
+    draw();
+</script>
+
+</body>
+</html>
